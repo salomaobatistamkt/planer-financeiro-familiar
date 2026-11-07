@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORY_GROUPS } from '../lib/finance-categories';
 
-const MONTHS = ['Janeiro','Fevereiro','Marco','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const EXPENSE_CATEGORIES = [
-  'Casa','Alimentacao','Transporte','Saude','Educacao','Comunicacao','Trabalho','Pet','Compromissos','Tarifas','Transferencias',
+  'Casa','Alimentacao','Transporte','Saude','Educacao','Comunicacao','Trabalho','Pet','Compromissos','Tarifas','Religiao','Transferencias',
   'Dividas','Investimentos','Streaming','Restaurante','Tecnologia','Presentes','Vestuario','Lazer','Pessoal','Outros','A classificar',
 ];
 const GROUP_LABELS = { necessidades:'Essenciais', desejos:'Nao essenciais', futuro:'Futuro / dividas e investimentos', fora_orcamento:'Transferencias (fora da regra)', a_classificar:'A classificar', outros:'A classificar' };
@@ -42,7 +42,7 @@ function Field({ label, children }) {
   return <label className="plan-field"><span>{label}</span>{children}</label>;
 }
 
-export default function PlanningPage({ transactions, month, year, onSetCategory }) {
+export default function PlanningPage({ transactions, month, year, onSetCategory, plan: serverPlan, onSavePlan }) {
   const [tab, setTab] = useState('Resumo');
   const [plan, setPlan] = useState(initialPlan);
   const [loaded, setLoaded] = useState(false);
@@ -55,28 +55,37 @@ export default function PlanningPage({ transactions, month, year, onSetCategory 
   const [paydowns, setPaydowns] = useState({});
   const [extraTargetInput, setExtraTargetInput] = useState('');
   const [categorySaveError, setCategorySaveError] = useState('');
+  const [saveState, setSaveState] = useState('');
 
+  // O planejamento fica no servidor (compartilhado entre Salomão e Elizandra).
+  // Se o servidor ainda não tem plano e este navegador tem um salvo da versão
+  // antiga, ele é enviado uma vez para o servidor.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(PLAN_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const base = initialPlan();
-        setPlan({ ...base, ...parsed, investments: Array.isArray(parsed.investments) ? parsed.investments : base.investments });
-        setExtraTargetInput(toInput(parsed.extraIncomeTarget || 0));
-      } else {
-        setPlan(initialPlan());
-        setExtraTargetInput('');
-      }
-    } catch {
-      setPlan(initialPlan());
+    if (loaded) return;
+    const base = initialPlan();
+    let source = serverPlan;
+    if (!source) {
+      try { const saved = localStorage.getItem(PLAN_KEY); if (saved) source = JSON.parse(saved); } catch {}
     }
+    const next = source ? { ...base, ...source, investments: Array.isArray(source.investments) ? source.investments : base.investments } : base;
+    setPlan(next);
+    setExtraTargetInput(toInput(next.extraIncomeTarget || 0));
     setLoaded(true);
-  }, []);
+    if (!serverPlan && source && onSavePlan) onSavePlan(next).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverPlan, loaded]);
 
+  const saveRef = useRef(onSavePlan);
+  saveRef.current = onSavePlan;
+  const firstSave = useRef(true);
   useEffect(() => {
     if (!loaded) return;
-    try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); } catch (error) { console.error('Nao foi possivel salvar o planejamento neste navegador.', error); }
+    if (firstSave.current) { firstSave.current = false; return; }
+    setSaveState('salvando');
+    const timer = setTimeout(() => {
+      Promise.resolve(saveRef.current && saveRef.current(plan)).then(() => setSaveState('salvo')).catch(() => setSaveState('erro'));
+    }, 700);
+    return () => clearTimeout(timer);
   }, [plan, loaded]);
 
   const update = updater => setPlan(current => typeof updater === 'function' ? updater(current) : { ...current, ...updater });
@@ -157,9 +166,7 @@ export default function PlanningPage({ transactions, month, year, onSetCategory 
   };
 
   const exportBackup = () => {
-    let categoryOverrides = {};
-    try { categoryOverrides = JSON.parse(localStorage.getItem('finance_category_overrides_v1') || '{}'); } catch {}
-    const blob = new Blob([JSON.stringify({ version:1, exportedAt:new Date().toISOString(), plan, categoryOverrides }, null, 2)], { type:'application/json' });
+    const blob = new Blob([JSON.stringify({ version:2, exportedAt:new Date().toISOString(), plan }, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -177,7 +184,7 @@ export default function PlanningPage({ transactions, month, year, onSetCategory 
         <h2>Organizacao financeira</h2>
         <p>Inspirada na planilha: conheca seus gastos, reduza dividas, invista todo mes e construa uma reserva de 6 meses do custo essencial.</p>
       </div>
-      <div className="plan-intro-actions"><div className="privacy-chip" title="Anotacoes, dividas, aportes e desejos ficam somente no armazenamento local deste navegador.">Dados pessoais salvos neste navegador</div><button className="btn btn-ghost btn-sm" onClick={exportBackup}>Baixar backup</button></div>
+      <div className="plan-intro-actions"><div className="privacy-chip" title="Anotações, dívidas, aportes e desejos ficam no servidor da família, visíveis para Salomão e Elizandra.">{saveState === 'salvando' ? 'Salvando…' : saveState === 'erro' ? 'Erro ao salvar — tente de novo' : 'Salvo na nuvem da família'}</div><button className="btn btn-ghost btn-sm" onClick={exportBackup}>Baixar backup</button></div>
     </div>
 
     <div className="plan-tabs" role="tablist" aria-label="Areas do planejamento">
@@ -323,7 +330,7 @@ export default function PlanningPage({ transactions, month, year, onSetCategory 
         </form>
       </Panel>
       <Panel title={`Anotacoes (${plan.notes.length})`} subtitle="Mais recentes primeiro.">
-        {plan.notes.length === 0 ? <div className="plan-empty">Seu caderno esta vazio. As anotacoes ficarao neste navegador.</div> : <div className="plan-note-list">{[...plan.notes].sort((a,b) => (b.date || '').localeCompare(a.date || '')).map(note => <article className="plan-note" key={note.id}><div><b>{note.title}</b><span>{dateLabel(note.date)}</span></div><p>{note.body}</p><button className="btn btn-ghost btn-sm" onClick={() => update(current => ({ ...current, notes:current.notes.filter(n => n.id !== note.id) }))}>Excluir</button></article>)}</div>}
+        {plan.notes.length === 0 ? <div className="plan-empty">Seu caderno está vazio. As anotações ficam salvas para vocês dois.</div> : <div className="plan-note-list">{[...plan.notes].sort((a,b) => (b.date || '').localeCompare(a.date || '')).map(note => <article className="plan-note" key={note.id}><div><b>{note.title}</b><span>{dateLabel(note.date)}</span></div><p>{note.body}</p><button className="btn btn-ghost btn-sm" onClick={() => update(current => ({ ...current, notes:current.notes.filter(n => n.id !== note.id) }))}>Excluir</button></article>)}</div>}
       </Panel>
     </>}
 

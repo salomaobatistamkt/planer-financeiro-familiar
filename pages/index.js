@@ -1,23 +1,26 @@
 import { useState, useEffect, useContext, createContext, useReducer, useRef, useCallback } from 'react';
 import Head from 'next/head';
-import { createClient } from '@supabase/supabase-js';
 import PlanningPage from '../components/PlanningPage';
-import { CATEGORY_GROUPS, classifyImportedTransaction } from '../lib/finance-categories';
-import financePersistence from '../lib/finance-persistence';
-const { mergeImportedTransactions, saveTransaction } = financePersistence;
+import ImportPage from '../components/ImportPage';
+import AccountsPage from '../components/AccountsPage';
+import TxnTable from '../components/TxnTable';
+import { CATEGORY_GROUPS } from '../lib/finance-categories';
+import { api, catLabel, HOLDER_LABELS } from '../lib/format';
 
-// ===================== SUPABASE =====================
-const SUPABASE_URL = 'https://ajftntxhhrntqnbtyizu.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFqZnRudHhoaHJudHFuYnR5aXp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NjU2MjEsImV4cCI6MjA5MzI0MTYyMX0.hmUQc_C4rEXF2NG-XsCRwt_81QRLDbqUv_eRsEGP9_o';
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+export async function getServerSideProps({ req }) {
+  const { currentUser } = require('../lib/server/auth');
+  const user = currentUser(req);
+  if (!user) return { redirect: { destination: '/login', permanent: false } };
+  return { props: { user: { id: user.id, name: user.name } } };
+}
 
 // ===================== CONSTANTS =====================
 const MONTHS = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
-const MONTHS_F = ['Janeiro','Fevereiro','Marco','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-const CATS_EXP = ['Casa','Alimentacao','Transporte','Saude','Educacao','Comunicacao','Trabalho','Pet','Compromissos','Tarifas','Dividas','Investimentos','Streaming','Restaurante','Tecnologia','Presentes','Vestuario','Lazer','Pessoal','Transferencias','Outros','A classificar'];
-const CATS_INC = ['Salario','Freelance','Bonus','Investimentos','Outra Fonte','Renda Extra'];
+const MONTHS_F = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const CATS_EXP = ['Casa','Alimentacao','Transporte','Saude','Educacao','Comunicacao','Trabalho','Pet','Compromissos','Tarifas','Religiao','Dividas','Investimentos','Streaming','Restaurante','Tecnologia','Presentes','Vestuario','Lazer','Pessoal','Transferencias','Outros','A classificar'];
+const CATS_INC = ['Salario','Freelance','Bonus','Renda Extra','Investimentos','Transferencias','Outra Fonte'];
 const PAY_METHODS = ['pix','credit','debit','boleto','cash'];
-const PAY_LABELS = {pix:'Pix',credit:'Credito',debit:'Debito',boleto:'Boleto',cash:'Dinheiro'};
+const PAY_LABELS = {pix:'Pix',credit:'Crédito',debit:'Débito',boleto:'Boleto',cash:'Dinheiro'};
 const CAT_COLORS = ['#FF3F5B','#4C7BFD','#00D26A','#F5A623','#9B72F6','#20C4F4','#FF7A00','#E86FD8','#52CC83','#F5D020','#FF6B6B','#74B9FF','#A8E063','#FD79A8','#6C5CE7','#FDCB6E','#00CEC9'];
 
 // ===================== DOMAIN =====================
@@ -73,309 +76,99 @@ const buildCalGrid = (year, month) => {
   return [...Array(fd).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
 };
 
-// ===================== SEED DATA (March, April + May) =====================
-const SEED = () => {
-  const mkExp = (d, month, year) => ({ ...d, id: uuid(), type: 'expense', month, year });
-  const mkInc = (d, month, year) => ({ ...d, id: uuid(), type: 'income', month, year });
-
-  const mar_exp = [
-    { description:'Seguro Carro', amount:toCents(128), category:'Transporte', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'boleto', date:'2026-03-05', installments:1, installmentMonth:null },
-    { description:'Caern (Agua)', amount:toCents(99), category:'Casa', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'boleto', date:'2026-03-10', installments:1, installmentMonth:null },
-    { description:'Internet', amount:toCents(102.28), category:'Casa', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'boleto', date:'2026-03-15', installments:1, installmentMonth:null },
-    { description:'MEI', amount:toCents(174.10), category:'Trabalho', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-03-20', installments:1, installmentMonth:null },
-    { description:'Veterinario 3/5', amount:toCents(148), category:'Pet', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'credit', date:'2026-03-12', installments:5, installmentMonth:3 },
-    { description:'Computador', amount:toCents(189.18), category:'Tecnologia', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'credit', date:'2026-03-01', installments:12, installmentMonth:3 },
-    { description:'Academia', amount:toCents(120), category:'Saude', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-03-05', installments:1, installmentMonth:null },
-    { description:'Mercado', amount:toCents(972.63), category:'Alimentacao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'credit', date:'2026-03-15', installments:1, installmentMonth:null },
-    { description:'Combustivel', amount:toCents(110), category:'Transporte', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-03-10', installments:1, installmentMonth:null },
-    { description:'Plano Saude', amount:toCents(449.43), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'boleto', date:'2026-03-05', installments:1, installmentMonth:null },
-    { description:'Dizimo', amount:toCents(499), category:'Religiao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-03-01', installments:1, installmentMonth:null },
-    { description:'Energia', amount:toCents(49.63), category:'Casa', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'boleto', date:'2026-03-20', installments:1, installmentMonth:null },
-    { description:'Amazon Prime', amount:toCents(3.98), category:'Streaming', group:'desejos', subcategory:'fixed', status:'paid', paymentMethod:'credit', date:'2026-03-15', installments:1, installmentMonth:null },
-    { description:'Spotify', amount:toCents(6.82), category:'Streaming', group:'desejos', subcategory:'fixed', status:'paid', paymentMethod:'credit', date:'2026-03-15', installments:1, installmentMonth:null },
-    { description:'iFood', amount:toCents(70.67), category:'Restaurante', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'credit', date:'2026-03-25', installments:1, installmentMonth:null },
-    { description:'Curso Sarah', amount:toCents(49), category:'Educacao', group:'futuro', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-03-01', installments:1, installmentMonth:null },
-  ];
-
-  const apr_exp = [
-    { description:'Seguro Carro', amount:toCents(128), category:'Transporte', group:'necessidades', subcategory:'fixed', status:'pending', paymentMethod:'boleto', date:'2026-04-05', installments:1, installmentMonth:null },
-    { description:'Caern (Agua)', amount:toCents(99), category:'Casa', group:'necessidades', subcategory:'fixed', status:'pending', paymentMethod:'boleto', date:'2026-04-10', installments:1, installmentMonth:null },
-    { description:'Internet', amount:toCents(102.28), category:'Casa', group:'necessidades', subcategory:'fixed', status:'pending', paymentMethod:'boleto', date:'2026-04-15', installments:1, installmentMonth:null },
-    { description:'MEI', amount:toCents(174.10), category:'Trabalho', group:'necessidades', subcategory:'fixed', status:'pending', paymentMethod:'pix', date:'2026-04-20', installments:1, installmentMonth:null },
-    { description:'Veterinario 4/5', amount:toCents(148), category:'Pet', group:'necessidades', subcategory:'fixed', status:'pending', paymentMethod:'credit', date:'2026-04-12', installments:5, installmentMonth:4 },
-    { description:'Academia', amount:toCents(120), category:'Saude', group:'necessidades', subcategory:'fixed', status:'pending', paymentMethod:'pix', date:'2026-04-05', installments:1, installmentMonth:null },
-    { description:'Amazon Prime', amount:toCents(3.98), category:'Streaming', group:'desejos', subcategory:'fixed', status:'pending', paymentMethod:'credit', date:'2026-04-15', installments:1, installmentMonth:null },
-    { description:'Spotify', amount:toCents(6.82), category:'Streaming', group:'desejos', subcategory:'fixed', status:'pending', paymentMethod:'credit', date:'2026-04-15', installments:1, installmentMonth:null },
-    { description:'Curso Sarah', amount:toCents(49), category:'Educacao', group:'futuro', subcategory:'fixed', status:'pending', paymentMethod:'pix', date:'2026-04-01', installments:1, installmentMonth:null },
-  ];
-
-  const income = [
-    mkInc({ description:'Renda Fixa', amount:toCents(2300), category:'Salario', status:'received', date:'2026-03-05', installments:1, installmentMonth:null }, 3, 2026),
-    mkInc({ description:'Renda Variavel', amount:toCents(1200), category:'Freelance', status:'received', date:'2026-03-10', installments:1, installmentMonth:null }, 3, 2026),
-    mkInc({ description:'Renda Fixa', amount:toCents(2300), category:'Salario', status:'received', date:'2026-04-05', installments:1, installmentMonth:null }, 4, 2026),
-    mkInc({ description:'Renda Variavel', amount:toCents(1200), category:'Freelance', status:'received', date:'2026-04-10', installments:1, installmentMonth:null }, 4, 2026),
-  ];
-
-  // ===================== MAIO 2026 — Extrato BB + Nubank =====================
-  const may_exp = [
-    // BB — saidas
-    mkExp({ description:'Shpp Brasil (Shopee)', amount:toCents(59.38), category:'Outros', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-01', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Pao Nosso Oliver Delivery', amount:toCents(26.60), category:'Restaurante', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-04', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Farmacia Pague Menos', amount:toCents(45.60), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-03', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Elizandra Andre De Oliveira', amount:toCents(500.00), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-05', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Uber Do Brasil', amount:toCents(6.15), category:'Transporte', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-06', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'TIM (Recarga)', amount:toCents(20.00), category:'Comunicacao', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-06', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Finnas Flores E Cestas', amount:toCents(86.00), category:'Presentes', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-07', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Nordestao (Supermercado)', amount:toCents(31.59), category:'Alimentacao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-08', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Jean Aparecido Silva De Brito', amount:toCents(30.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Igreja Batista Ibrecem (Dizimo)', amount:toCents(562.30), category:'Religiao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Elizandra Andre (Transferencia)', amount:toCents(102.02), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Elizandra Andre (Transferencia)', amount:toCents(126.00), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Elizandra Andre (Transferencia)', amount:toCents(1442.33), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Elizandra Andre (Transferencia)', amount:toCents(1207.00), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Via Hospitalar', amount:toCents(110.00), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-15', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Jose Rodrigo Souza Nunes', amount:toCents(10.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-17', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Pao Nosso Oliver Delivery', amount:toCents(27.15), category:'Restaurante', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-18', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Alessandra Moura De Araujo', amount:toCents(13.50), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-20', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Heridan Pinheiro Da Silva', amount:toCents(16.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-21', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Maternidade Almeida Castro', amount:toCents(4.50), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-22', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Farmacia Pague Menos', amount:toCents(634.87), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-23', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Nordestao (Supermercado)', amount:toCents(88.23), category:'Alimentacao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-26', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Li Ji', amount:toCents(50.95), category:'Alimentacao', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-29', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Uber Do Brasil', amount:toCents(7.35), category:'Transporte', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Uber Do Brasil', amount:toCents(6.68), category:'Transporte', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'TIM (Recarga)', amount:toCents(30.00), category:'Comunicacao', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Drogaria Globo', amount:toCents(52.99), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-31', installments:1, installmentMonth:null }, 5, 2026),
-    // Nubank — saidas
-    mkExp({ description:'PicPay (Transferencia)', amount:toCents(0.21), category:'Outros', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-01', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Keziany Kathleen', amount:toCents(4.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-01', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Danielle Louise Fernandes', amount:toCents(520.00), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-04', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Airbnb', amount:toCents(348.60), category:'Outros', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-04', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Lucia Helena Soares Da Costa', amount:toCents(40.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-07', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Churrascaria Camaratuba', amount:toCents(3.00), category:'Restaurante', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-07', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Fina Flores E Cestas', amount:toCents(214.00), category:'Presentes', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-08', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Panificadora Pao Nosso', amount:toCents(14.79), category:'Alimentacao', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'debit', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Dia A Dia Atacado', amount:toCents(428.64), category:'Alimentacao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'debit', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Assai Atacadista', amount:toCents(90.19), category:'Alimentacao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'debit', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Farmacia Pague Menos', amount:toCents(114.58), category:'Saude', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-11', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Aplicacao RDB', amount:toCents(1207.00), category:'Investimentos', group:'futuro', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Aplicacao RDB', amount:toCents(200.00), category:'Investimentos', group:'futuro', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Aplicacao RDB', amount:toCents(1442.33), category:'Investimentos', group:'futuro', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'TCM TV Cabo Mossoro', amount:toCents(102.02), category:'Casa', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'TIM (Plano)', amount:toCents(59.99), category:'Comunicacao', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Y T C Monteiro Ltda', amount:toCents(104.00), category:'Casa', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'PicPay (Transferencia)', amount:toCents(8.44), category:'Outros', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-13', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Larissa De Castro Marques', amount:toCents(70.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-13', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'D B O Do Nascimento Barros', amount:toCents(28.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-14', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Francisca Aldevenia Soares', amount:toCents(5.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-15', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Caern (Agua)', amount:toCents(96.83), category:'Casa', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'pix', date:'2026-05-16', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Eric Vinicius Reinaldo', amount:toCents(10.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-16', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Y T C Monteiro Ltda', amount:toCents(31.00), category:'Casa', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-17', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Hinova Pay (Boleto)', amount:toCents(126.90), category:'Outros', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'boleto', date:'2026-05-18', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Danielle Louise Fernandes', amount:toCents(500.20), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-18', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Receita Federal', amount:toCents(87.34), category:'Trabalho', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-21', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Unimed Natal (Plano Saude)', amount:toCents(458.54), category:'Saude', group:'necessidades', subcategory:'fixed', status:'paid', paymentMethod:'boleto', date:'2026-05-21', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Receita Federal', amount:toCents(112.39), category:'Trabalho', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-22', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'iFood', amount:toCents(44.98), category:'Restaurante', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-22', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Salomao Batista (Transf.)', amount:toCents(150.00), category:'Pessoal', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-23', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Assai Atacadista', amount:toCents(30.68), category:'Alimentacao', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'debit', date:'2026-05-24', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'D B O Do Nascimento Barros', amount:toCents(34.90), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-24', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Y T C Monteiro Ltda', amount:toCents(23.50), category:'Casa', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-26', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Americanas', amount:toCents(11.99), category:'Outros', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'debit', date:'2026-05-29', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Epar Estacionamentos', amount:toCents(11.00), category:'Transporte', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'debit', date:'2026-05-29', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Eric Vinicius Reinaldo', amount:toCents(20.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Allan Gas', amount:toCents(115.00), category:'Casa', group:'necessidades', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-    mkExp({ description:'Yonara Viviany Santana', amount:toCents(100.00), category:'Pessoal', group:'desejos', subcategory:'variable', status:'paid', paymentMethod:'pix', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-  ];
-
-  const may_inc = [
-    // BB — entradas
-    mkInc({ description:'Kiwify Pagamentos', amount:toCents(492.33), category:'Renda Extra', status:'received', date:'2026-05-05', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Adao Jose De Oliveira', amount:toCents(130.00), category:'Outra Fonte', status:'received', date:'2026-05-06', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Amarketing & Vendas Ltda', amount:toCents(2299.32), category:'Freelance', status:'received', date:'2026-05-06', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Matheus Da Silva Nascimento', amount:toCents(892.00), category:'Outra Fonte', status:'received', date:'2026-05-07', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Wepayments Kiwify', amount:toCents(46.76), category:'Renda Extra', status:'received', date:'2026-05-08', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Matheus Da Silva Nascimento', amount:toCents(285.00), category:'Outra Fonte', status:'received', date:'2026-05-10', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Matheus Da Silva Nascimento', amount:toCents(30.00), category:'Outra Fonte', status:'received', date:'2026-05-11', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Kiwify Pagamentos', amount:toCents(596.33), category:'Renda Extra', status:'received', date:'2026-05-18', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Mardonio Luiz Peixoto Chaves', amount:toCents(200.00), category:'Outra Fonte', status:'received', date:'2026-05-24', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Elizandra Andre De Oliveira', amount:toCents(150.00), category:'Outra Fonte', status:'received', date:'2026-05-23', installments:1, installmentMonth:null }, 5, 2026),
-    // Nubank — entradas
-    mkInc({ description:'Resgate RDB', amount:toCents(15.00), category:'Investimentos', status:'received', date:'2026-05-01', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Belchior Lino De Oliveira', amount:toCents(1500.00), category:'Outra Fonte', status:'received', date:'2026-05-03', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Yonara Viviany Santana', amount:toCents(3.98), category:'Outra Fonte', status:'received', date:'2026-05-05', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Salomao Salim Da Silva Batista', amount:toCents(500.00), category:'Outra Fonte', status:'received', date:'2026-05-05', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Franciane Maraiza Olinto', amount:toCents(3.98), category:'Outra Fonte', status:'received', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Quezia Sharlene Marinho', amount:toCents(200.00), category:'Outra Fonte', status:'received', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Maria Gorette Andre De Oliveira', amount:toCents(500.00), category:'Outra Fonte', status:'received', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Janaina Cortez Oliveira', amount:toCents(150.00), category:'Outra Fonte', status:'received', date:'2026-05-09', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Belchior Lino De Oliveira', amount:toCents(2000.00), category:'Outra Fonte', status:'received', date:'2026-05-11', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Salomao Salim Da Silva Batista', amount:toCents(1207.00), category:'Outra Fonte', status:'received', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Salomao Salim Da Silva Batista', amount:toCents(1442.33), category:'Outra Fonte', status:'received', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Salomao Salim Da Silva Batista', amount:toCents(126.00), category:'Outra Fonte', status:'received', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Salomao Salim Da Silva Batista', amount:toCents(102.02), category:'Outra Fonte', status:'received', date:'2026-05-12', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Gilrlliany Lidya Justino', amount:toCents(12.30), category:'Outra Fonte', status:'received', date:'2026-05-14', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Gabriel Nunes Arruda Gurgel', amount:toCents(8.30), category:'Outra Fonte', status:'received', date:'2026-05-15', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Jonathan Evangelista Do Rego', amount:toCents(3.98), category:'Outra Fonte', status:'received', date:'2026-05-15', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Resgate RDB', amount:toCents(520.00), category:'Investimentos', status:'received', date:'2026-05-18', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Clelio Silva Batista', amount:toCents(350.00), category:'Outra Fonte', status:'received', date:'2026-05-19', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Resgate RDB', amount:toCents(90.00), category:'Investimentos', status:'received', date:'2026-05-24', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Unimed Natal (Reembolso)', amount:toCents(808.12), category:'Outra Fonte', status:'received', date:'2026-05-26', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Elizandra Andre De Oliveira', amount:toCents(300.00), category:'Outra Fonte', status:'received', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-    mkInc({ description:'Eric Vinicius Reinaldo (Reemb.)', amount:toCents(10.00), category:'Outra Fonte', status:'received', date:'2026-05-30', installments:1, installmentMonth:null }, 5, 2026),
-  ];
-
-  return [
-    ...mar_exp.map(e => mkExp(e, 3, 2026)),
-    ...apr_exp.map(e => mkExp(e, 4, 2026)),
-    ...income,
-    ...may_exp,
-    ...may_inc,
-  ];
-};
-
 // ===================== STATE =====================
 const FinCtx = createContext(null);
-const INIT_STATE = { transactions: [], view: 'dashboard', month: new Date().getMonth() + 1, year: new Date().getFullYear(), loading: true, syncing: false };
+const now = new Date();
+const INIT_STATE = { transactions: [], accounts: {}, plan: null, imports: [], updatedAt: null, view: 'dashboard', month: now.getMonth() + 1, year: now.getFullYear(), loading: true, syncing: false, error: null, toast: null };
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'SET_TXN': return { ...state, transactions: action.payload, loading: false };
+    case 'LOAD': return { ...state, ...action.payload, loading: false, error: null };
     case 'ADD_TXN': return { ...state, transactions: [...state.transactions, action.payload] };
-    case 'UPD_TXN': return { ...state, transactions: state.transactions.map(t => t.id === action.payload.id ? action.payload : t) };
+    case 'UPD_TXN': return { ...state, transactions: state.transactions.map(t => t.id === action.payload.id ? { ...t, ...action.payload } : t) };
     case 'DEL_TXN': return { ...state, transactions: state.transactions.filter(t => t.id !== action.id) };
     case 'SET_VIEW': return { ...state, view: action.payload };
     case 'SET_MONTH': return { ...state, month: action.month, year: action.year };
-    case 'SET_LOADING': return { ...state, loading: action.payload };
     case 'SET_SYNCING': return { ...state, syncing: action.payload };
+    case 'ERROR': return { ...state, error: action.payload, loading: false };
+    case 'TOAST': return { ...state, toast: action.payload };
     default: return state;
   }
 }
 
-// ===================== SUPABASE HELPERS =====================
-async function dbLoad() {
-  if (!supabase) return null;
-  const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false });
-  if (error) { console.error('Supabase load error:', error); return null; }
-  return data.map(r => ({
-    id: r.id, type: r.type, description: r.description, amount: r.amount,
-    category: r.category, group: r.group_name, subcategory: r.subcategory,
-    status: r.status, paymentMethod: r.payment_method, date: r.date,
-    month: r.month, year: r.year,
-    titular: r.titular || null, source: r.source || null,
-    categoryOverride: r.category_override || null, importRecordId: r.import_record_id || null,
-    installments: r.installments || 1, installmentMonth: r.installment_month || null,
-  }));
-}
-
-async function loadDriveTransactions() {
-  try {
-    const response = await fetch('/nubank-transactions.json');
-    if (!response.ok) return [];
-    const rows = await response.json();
-    return Array.isArray(rows) ? rows.map(classifyImportedTransaction) : [];
-  } catch (error) {
-    console.error('Extrato Nubank indisponível:', error);
-    return [];
-  }
-}
-
-function loadCategoryOverrides() {
-  try { return JSON.parse(localStorage.getItem('finance_category_overrides_v1') || '{}'); }
-  catch { return {}; }
-}
-
-function applyCategoryOverrides(transactions, overrides) {
-  return (transactions || []).map(txn => {
-    const category = txn.categoryOverride || (overrides && (overrides[txn.id] || overrides[txn.importRecordId]));
-    if (!category) return txn;
-    return { ...txn, category, categoryOverride:category, group:CATEGORY_GROUPS[category] || 'a_classificar' };
-  });
-}
-
-async function dbDelete(id) {
-  if (!supabase) return;
-  await supabase.from('transactions').delete().eq('id', id);
-}
-
 // ===================== PROVIDER =====================
-function FinProvider({ children }) {
+function FinProvider({ user, children }) {
   const [state, dispatch] = useReducer(reducer, INIT_STATE);
+  const updatedRef = useRef(null);
 
-  useEffect(() => {
-    let channel;
-    let active = true;
-    async function init() {
-      dispatch({ type: 'SET_LOADING', payload: true });
-      const imported = await loadDriveTransactions();
-      if (supabase) {
-        const remote = await dbLoad();
-        const existing = remote && remote.length > 0 ? remote : SEED();
-        if (active) dispatch({ type: 'SET_TXN', payload: applyCategoryOverrides(mergeImportedTransactions(existing, imported), loadCategoryOverrides()) });
-        // Imported CSV rows are displayed without writing them to Supabase.
-        // Realtime subscription
-        channel = supabase.channel('transactions-sync')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, async () => {
-            const fresh = await dbLoad();
-            if (active && fresh) {
-              dispatch({ type: 'SET_TXN', payload: applyCategoryOverrides(mergeImportedTransactions(fresh, imported), loadCategoryOverrides()) });
-            }
-          }).subscribe();
-      } else {
-        try {
-          const saved = localStorage.getItem('fin_txns_v3');
-          if (saved) {
-            const local = JSON.parse(saved);
-            if (active) dispatch({ type: 'SET_TXN', payload: applyCategoryOverrides(mergeImportedTransactions(local, imported), loadCategoryOverrides()) });
-          } else if (active) dispatch({ type: 'SET_TXN', payload: applyCategoryOverrides(mergeImportedTransactions(SEED(), imported), loadCategoryOverrides()) });
-        } catch {
-          if (active) dispatch({ type: 'SET_TXN', payload: applyCategoryOverrides(mergeImportedTransactions(SEED(), imported), loadCategoryOverrides()) });
-        }
+  const load = useCallback(async (silent) => {
+    try {
+      if (silent) dispatch({ type:'SET_SYNCING', payload:true });
+      const q = silent && updatedRef.current ? `?since=${encodeURIComponent(updatedRef.current)}` : '';
+      const d = await api(`/api/data${q}`);
+      if (!d.unchanged) {
+        updatedRef.current = d.updatedAt;
+        dispatch({ type:'LOAD', payload:{ transactions:d.transactions, accounts:d.accounts || {}, plan:d.plan, imports:d.imports || [], updatedAt:d.updatedAt } });
       }
-    }
-    init();
-    return () => {
-      active = false;
-      if (channel && supabase) supabase.removeChannel(channel);
-    };
+    } catch (e) {
+      if (!silent) dispatch({ type:'ERROR', payload:e.message });
+    } finally { if (silent) dispatch({ type:'SET_SYNCING', payload:false }); }
   }, []);
 
+  // Primeira carga: abre no mês mais recente que tenha lançamentos.
   useEffect(() => {
-    if (!supabase && state.transactions.length > 0 && !state.loading) {
-      localStorage.setItem('fin_txns_v3', JSON.stringify(state.transactions));
-    }
-  }, [state.transactions, state.loading]);
+    (async () => {
+      await load(false);
+    })();
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') load(true); }, 20000);
+    const onFocus = () => load(true);
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(timer); window.removeEventListener('focus', onFocus); };
+  }, [load]);
+
+  const toast = (text, type = 'success') => {
+    dispatch({ type:'TOAST', payload:{ text, type } });
+    setTimeout(() => dispatch({ type:'TOAST', payload:null }), 3500);
+  };
+
+  const persist = async list => {
+    const r = await api('/api/transactions', { method:'POST', body:list });
+    return r.transactions;
+  };
 
   const actions = {
+    reload: () => load(false),
+    toast,
     addTxn: async txn => {
-      await saveTransaction(supabase, txn);
-      dispatch({ type: 'ADD_TXN', payload: txn });
+      const [saved] = await persist([{ titular:user.id, account:`manual-${user.id}`, ...txn }]);
+      dispatch({ type:'ADD_TXN', payload:saved });
+      toast('Lançamento salvo');
     },
     updTxn: async txn => {
-      const persisted = txn.importRecordId ? { ...txn, categoryOverride:txn.category } : txn;
-      await saveTransaction(supabase, persisted);
-      dispatch({ type: 'UPD_TXN', payload: persisted });
+      const [saved] = await persist([txn]);
+      dispatch({ type:'UPD_TXN', payload:saved });
+      toast('Lançamento atualizado');
     },
     delTxn: async id => {
-      dispatch({ type: 'DEL_TXN', id });
-      await dbDelete(id);
+      await api(`/api/transactions?id=${encodeURIComponent(id)}`, { method:'DELETE' });
+      dispatch({ type:'DEL_TXN', id });
+      toast('Lançamento excluído');
     },
     setTxnCategory: async (txnId, category) => {
       const txn = state.transactions.find(item => item.id === txnId);
       if (!txn) return;
-      const group = CATEGORY_GROUPS[category] || 'a_classificar';
+      const group = txn.type === 'expense' ? (CATEGORY_GROUPS[category] || 'a_classificar') : null;
       const updated = { ...txn, category, categoryOverride:category, group };
-      await saveTransaction(supabase, updated);
-      const overrides = loadCategoryOverrides();
-      overrides[txnId] = category;
-      if (txn.importRecordId) overrides[txn.importRecordId] = category;
-      localStorage.setItem('finance_category_overrides_v1', JSON.stringify(overrides));
       dispatch({ type:'UPD_TXN', payload:updated });
+      try { await persist([updated]); toast(`Categoria: ${catLabel(category)}`); }
+      catch (e) { dispatch({ type:'UPD_TXN', payload:txn }); toast(e.message, 'error'); }
     },
+    savePlan: async plan => { await api('/api/plan', { method:'PUT', body:{ plan } }); },
   };
 
-  return <FinCtx.Provider value={{ state, dispatch, actions }}>{children}</FinCtx.Provider>;
+  return <FinCtx.Provider value={{ state, dispatch, actions, user }}>{children}</FinCtx.Provider>;
 }
+
 
 const useFin = () => useContext(FinCtx);
 
@@ -481,7 +274,7 @@ function LineChart({ data, width = 520, height = 170 }) {
         ))}
         {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
           <text key={i} x={pad.l - 6} y={pad.t + H * (1 - t) + 4} textAnchor="end" fill="var(--t3)" fontSize="9">
-            {(maxV * t / 100).toFixed(0)}k
+            {maxV * t >= 100000 ? `${(maxV * t / 100000).toFixed(1).replace('.', ',')}k` : (maxV * t / 100).toFixed(0)}
           </text>
         ))}
         <path d={pathOf('inc')} fill="none" stroke="var(--green)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -615,7 +408,7 @@ function CategoryBars({ data, total }) {
           <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, marginBottom:3 }}>
             <span style={{ display:'flex', alignItems:'center', gap:5 }}>
               <span style={{ width:8, height:8, borderRadius:'50%', background:CAT_COLORS[i % CAT_COLORS.length], display:'inline-block' }} />
-              {c.cat}
+              {catLabel(c.cat)}
             </span>
             <span style={{ fontFamily:'monospace', fontSize:11, color:'var(--t2)' }}>{fmt(c.amt)}</span>
           </div>
@@ -710,8 +503,10 @@ function AmountInput({ value, onChange, placeholder = '0,00' }) {
 
 // ===================== TRANSACTION MODAL =====================
 function TxnModal({ txn, type, onSave, onClose }) {
+  const { state, user } = useFin();
   const initAmount = txn ? txn.amount : 0;
   const [form, setForm] = useState(txn || {
+    titular: user.id, account: `manual-${user.id}`, counterparty: '',
     description:'', amount:0, category: type === 'income' ? 'Salario' : 'Alimentacao',
     group:'necessidades', subcategory:'variable', status: type === 'income' ? 'received' : 'pending',
     paymentMethod:'pix', date:todayISO(), type,
@@ -742,7 +537,7 @@ function TxnModal({ txn, type, onSave, onClose }) {
         installmentMonth: isCredit ? (parseInt(form.installmentMonth) || month) : null,
       });
     } catch (error) {
-      setSaveError(`Não foi possível salvar no banco. A alteração continua no formulário. ${error?.message || ''}`.trim());
+      setSaveError(`Não foi possível salvar. A alteração continua no formulário. ${error?.message || ''}`.trim());
     } finally {
       setSaving(false);
     }
@@ -752,13 +547,32 @@ function TxnModal({ txn, type, onSave, onClose }) {
     <div className="overlay" onClick={e => { if (e.target.classList.contains('overlay')) onClose(); }}>
       <div className="modal">
         <div className="modal-title">
-          <span>{txn ? 'Editar' : 'Nova'} {type === 'income' ? 'Entrada' : 'Saida'}</span>
+          <span>{txn ? 'Editar' : 'Nova'} {type === 'income' ? 'entrada' : 'saída'}</span>
           <button className="btn-icon" onClick={onClose}>&#x2715;</button>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
           <div className="form-group">
-            <label className="lbl">Descricao *</label>
-            <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Ex: Mercado, Salario..." />
+            <label className="lbl">Descrição *</label>
+            <input value={form.description} onChange={e => set('description', e.target.value)} placeholder="Ex.: Mercado, Salário…" />
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="lbl">{type === 'income' ? 'Origem (quem pagou)' : 'Destino (quem recebeu)'}</label>
+              <input value={form.counterparty || ''} onChange={e => set('counterparty', e.target.value)} placeholder="Ex.: Assaí, Kiwify…" />
+            </div>
+            <div className="form-group">
+              <label className="lbl">Titular</label>
+              <select value={form.titular || user.id} onChange={e => setForm(f => ({ ...f, titular:e.target.value, account: f.account && f.account.startsWith('manual-') ? `manual-${e.target.value}` : f.account }))}>
+                {Object.entries(HOLDER_LABELS).map(([id, l]) => <option key={id} value={id}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="lbl">Conta</label>
+            <select value={form.account || ''} onChange={e => set('account', e.target.value)}>
+              {Object.values(state.accounts || {}).filter(a => !a.titular || a.titular === (form.titular || user.id)).map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+              {form.account && !(state.accounts || {})[form.account] && <option value={form.account}>{form.account}</option>}
+            </select>
           </div>
           <div className="form-row">
             <div className="form-group">
@@ -773,8 +587,8 @@ function TxnModal({ txn, type, onSave, onClose }) {
           <div className="form-row">
             <div className="form-group">
               <label className="lbl">Categoria</label>
-              <select value={form.category} onChange={e => set('category', e.target.value)}>
-                {(type === 'income' ? CATS_INC : CATS_EXP).map(c => <option key={c}>{c}</option>)}
+              <select value={form.category} onChange={e => { const c = e.target.value; setForm(f => ({ ...f, category:c, group: type === 'expense' ? (CATEGORY_GROUPS[c] || f.group) : f.group })); }}>
+                {(type === 'income' ? CATS_INC : CATS_EXP).map(c => <option key={c} value={c}>{catLabel(c)}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -795,13 +609,15 @@ function TxnModal({ txn, type, onSave, onClose }) {
                     <option value="necessidades">Necessidades (50%)</option>
                     <option value="desejos">Desejos (30%)</option>
                     <option value="futuro">Futuro (20%)</option>
+                    <option value="fora_orcamento">Fora do orçamento</option>
+                    <option value="a_classificar">A classificar</option>
                   </select>
                 </div>
                 <div className="form-group">
                   <label className="lbl">Tipo</label>
                   <select value={form.subcategory} onChange={e => set('subcategory', e.target.value)}>
                     <option value="fixed">Fixo</option>
-                    <option value="variable">Variavel</option>
+                    <option value="variable">Variável</option>
                   </select>
                 </div>
               </div>
@@ -813,18 +629,18 @@ function TxnModal({ txn, type, onSave, onClose }) {
               </div>
               {isCredit && (
                 <div style={{ background:'var(--s2)', border:'1px solid var(--bd)', borderRadius:'var(--r2)', padding:14, display:'flex', flexDirection:'column', gap:12 }}>
-                  <div style={{ fontSize:12, color:'var(--blue)', fontWeight:600 }}>&#128179; Opcoes de Credito</div>
+                  <div style={{ fontSize:12, color:'var(--blue)', fontWeight:600 }}>&#128179; Opções de crédito</div>
                   <div className="form-row">
                     <div className="form-group">
-                      <label className="lbl">Numero de Parcelas</label>
+                      <label className="lbl">Número de parcelas</label>
                       <select value={form.installments} onChange={e => set('installments', parseInt(e.target.value))}>
                         {[1,2,3,4,5,6,7,8,9,10,11,12,18,24,36,48,60].map(n => (
-                          <option key={n} value={n}>{n === 1 ? 'A vista (1x)' : n + 'x'}</option>
+                          <option key={n} value={n}>{n === 1 ? 'À vista (1x)' : n + 'x'}</option>
                         ))}
                       </select>
                     </div>
                     <div className="form-group">
-                      <label className="lbl">Mes da Compra</label>
+                      <label className="lbl">Mês da compra</label>
                       <select value={form.installmentMonth || dateToMonthYear(form.date).month} onChange={e => set('installmentMonth', parseInt(e.target.value))}>
                         {MONTHS_F.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
                       </select>
@@ -880,13 +696,13 @@ function Dashboard() {
           <div style={{ position:'absolute', bottom:12, right:12 }}><Sparkline values={incHistory} color="var(--green)" /></div>
         </div>
         <div className="card red">
-          <div className="card-label">&#8595; Saidas</div>
+          <div className="card-label">&#8595; Saídas</div>
           <div className="card-value">{fmt(exp)}</div>
-          <div className="card-sub">{expTxns.length} transacoes</div>
+          <div className="card-sub">{expTxns.length} transações</div>
           <div style={{ position:'absolute', bottom:12, right:12 }}><Sparkline values={expHistory} color="var(--red)" /></div>
         </div>
         <div className={`card ${net >= 0 ? 'blue' : 'red'}`}>
-          <div className="card-label">= Saldo Liquido</div>
+          <div className="card-label">= Saldo líquido</div>
           <div className="card-value">{fmtSigned(net)}</div>
           <div className="card-sub">{net >= 0 ? 'Superavit' : 'Deficit'} no mes</div>
         </div>
@@ -899,8 +715,8 @@ function Dashboard() {
 
       {inc > 0 && (
         <div className="chart-card">
-          <div className="chart-title">Taxa de Poupanca</div>
-          <div className="chart-sub">{sr >= 0 ? fmtPct(sr) + ' do salario poupado' : 'Gastos excedem renda em ' + fmtPct(Math.abs(sr))}</div>
+          <div className="chart-title">Taxa de Poupança</div>
+          <div className="chart-sub">{sr >= 0 ? fmtPct(sr) + ' da renda poupada' : 'Gastos excedem renda em ' + fmtPct(Math.abs(sr))}</div>
           <div className="prog-bar" style={{ height:10 }}>
             <div className="prog-fill" style={{ width: Math.min(100, Math.max(0, sr)) + '%', background: sr >= 20 ? 'var(--green)' : sr >= 0 ? 'var(--amber)' : 'var(--red)', transition:'width 0.8s ease' }} />
           </div>
@@ -915,16 +731,16 @@ function Dashboard() {
 
       <div className="charts-row">
         <div className="chart-card">
-          <div className="chart-title">Evolucao Anual {year}</div>
-          <div className="chart-sub">Entradas vs Saidas — passe o mouse nos pontos</div>
+          <div className="chart-title">Evolução Anual {year}</div>
+          <div className="chart-sub">Entradas vs saídas — passe o mouse nos pontos</div>
           <LineChart data={monthly} />
           <div className="legend">
             <div className="legend-item"><div className="legend-dot" style={{ background:'var(--green)' }} /> Entradas</div>
-            <div className="legend-item"><div className="legend-dot" style={{ background:'var(--red)' }} /> Saidas</div>
+            <div className="legend-item"><div className="legend-dot" style={{ background:'var(--red)' }} /> Saídas</div>
           </div>
         </div>
         <div className="chart-card">
-          <div className="chart-title">Gastos por Categoria</div>
+          <div className="chart-title">Gastos por categoria</div>
           <div className="chart-sub">Passe o mouse para detalhes</div>
           <div style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
             <DonutChart data={catData} total={exp} />
@@ -989,62 +805,29 @@ function Dashboard() {
 // ===================== INCOME PAGE =====================
 function IncomePage() {
   const { state, actions } = useFin();
-  const { transactions, month, year } = state;
+  const { transactions, month, year, accounts } = state;
   const [modal, setModal] = useState(null);
-  const [search, setSearch] = useState('');
   const monthTxns = filterMonth(filterType(transactions, 'income'), month, year);
-  const filtered = monthTxns.filter(t =>
-    t.description.toLowerCase().includes(search.toLowerCase()) ||
-    t.category.toLowerCase().includes(search.toLowerCase())
-  );
-  const total = sumAmts(filtered);
-  const received = sumAmts(filtered.filter(t => t.status === 'received'));
-
+  const internal = sumAmts(monthTxns.filter(t => t.category === 'Transferencias'));
+  const total = sumAmts(monthTxns);
+  const received = sumAmts(monthTxns.filter(t => t.status === 'received'));
   const save = async txn => {
     if (txn.id && transactions.find(t => t.id === txn.id)) await actions.updTxn(txn);
     else await actions.addTxn({ ...txn, type:'income' });
     setModal(null);
   };
-
   return (
     <div className="content">
-      <div className="cards-row" style={{ gridTemplateColumns:'repeat(3,1fr)' }}>
-        <div className="card green"><div className="card-label">Total Entradas</div><div className="card-value">{fmt(total)}</div></div>
+      <div className="cards-row">
+        <div className="card green"><div className="card-label">Total de entradas</div><div className="card-value">{fmt(total)}</div><div className="card-sub">{monthTxns.length} lançamentos</div></div>
         <div className="card blue"><div className="card-label">Recebido</div><div className="card-value">{fmt(received)}</div></div>
         <div className="card amber"><div className="card-label">Pendente</div><div className="card-value">{fmt(total - received)}</div></div>
+        <div className="card purple"><div className="card-label">Transferências entre vocês</div><div className="card-value">{fmt(internal)}</div><div className="card-sub">não é renda nova</div></div>
       </div>
-      <div className="table-wrap">
-        <div className="table-header">
-          <div className="table-title">Entradas — {MONTHS_F[month - 1]} {year}</div>
-          <div className="table-controls">
-            <input style={{ width:180 }} placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} />
-            <button className="btn btn-primary" onClick={() => setModal({ type:'income' })}>+ Nova Entrada</button>
-          </div>
-        </div>
-        <table>
-          <thead><tr><th>Descricao</th><th>Categoria</th><th>Data</th><th>Status</th><th>Valor</th><th></th></tr></thead>
-          <tbody>
-            {filtered.length === 0 && <tr><td colSpan="6" style={{ textAlign:'center', color:'var(--t3)', padding:24 }}>Nenhuma entrada registrada</td></tr>}
-            {filtered.map(t => (
-              <tr key={t.id}>
-                <td><b>{t.description}</b></td>
-                <td>{t.category}</td>
-                <td>{t.date}</td>
-                <td><StatusBadge status={t.status} /></td>
-                <td style={{ fontFamily:'monospace', color:'var(--green)', fontWeight:700 }}>{fmt(t.amount)}</td>
-                <td>
-                  <div style={{ display:'flex', gap:4 }}>
-                    <button className="btn-icon" onClick={() => setModal({ ...t, _edit:true })}>&#9998;</button>
-                    <button className="btn-icon btn-danger" onClick={() => { if (confirm('Excluir?')) actions.delTxn(t.id); }}>&#x2715;</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          {filtered.length > 0 && <tfoot><tr><td colSpan="4">Total</td><td>{fmt(total)}</td><td /></tr></tfoot>}
-        </table>
-      </div>
-      {modal && <TxnModal txn={modal._edit ? modal : null} type={modal.type || 'income'} onSave={save} onClose={() => setModal(null)} />}
+      <TxnTable type="income" title={`Entradas — ${MONTHS_F[month - 1]} ${year}`} rows={monthTxns} accounts={accounts}
+        onNew={() => setModal({ type:'income' })} onEdit={t => setModal({ ...t, _edit:true })} onDelete={actions.delTxn}
+        onCategory={(t, c) => actions.setTxnCategory(t.id, c)} />
+      {modal && <TxnModal txn={modal._edit ? modal : null} type="income" onSave={save} onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -1052,105 +835,34 @@ function IncomePage() {
 // ===================== EXPENSES PAGE =====================
 function ExpensesPage() {
   const { state, actions } = useFin();
-  const { transactions, month, year } = state;
+  const { transactions, month, year, accounts } = state;
   const [modal, setModal] = useState(null);
-  const [search, setSearch] = useState('');
-  const [filterGrp, setFilterGrp] = useState('all');
-  const [filterSub, setFilterSub] = useState('all');
-  const [filterPay, setFilterPay] = useState('all');
   const monthTxns = filterMonth(filterType(transactions, 'expense'), month, year);
-  const filtered = monthTxns.filter(t => {
-    const q = search.toLowerCase();
-    const matchQ = !q || t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q);
-    const matchG = filterGrp === 'all' || t.group === filterGrp;
-    const matchS = filterSub === 'all' || t.subcategory === filterSub;
-    const matchP = filterPay === 'all' || t.paymentMethod === filterPay;
-    return matchQ && matchG && matchS && matchP;
-  });
-  const total = sumAmts(filtered);
-  const paid = sumAmts(filtered.filter(t => t.status === 'paid'));
-  const pending = sumAmts(filtered.filter(t => t.status === 'pending' || t.status === 'overdue'));
-  const creditTotal = sumAmts(filtered.filter(t => t.paymentMethod === 'credit'));
-
+  const total = sumAmts(monthTxns);
+  const pending = sumAmts(monthTxns.filter(t => t.status === 'pending' || t.status === 'overdue'));
+  const creditTotal = sumAmts(monthTxns.filter(t => t.paymentMethod === 'credit'));
+  const unclassified = monthTxns.filter(t => t.category === 'A classificar' || t.category === 'Outros').length;
   const save = async txn => {
     if (txn.id && transactions.find(t => t.id === txn.id)) await actions.updTxn(txn);
     else await actions.addTxn({ ...txn, type:'expense' });
     setModal(null);
   };
-
   return (
     <div className="content">
       <div className="cards-row">
-        <div className="card red"><div className="card-label">Total Saidas</div><div className="card-value">{fmt(total)}</div></div>
-        <div className="card green"><div className="card-label">Pago</div><div className="card-value">{fmt(paid)}</div></div>
-        <div className="card amber"><div className="card-label">Pendente</div><div className="card-value">{fmt(pending)}</div></div>
-        <div className="card blue"><div className="card-label">&#128179; Credito</div><div className="card-value">{fmt(creditTotal)}</div></div>
+        <div className="card red"><div className="card-label">Total de saídas</div><div className="card-value">{fmt(total)}</div><div className="card-sub">{monthTxns.length} lançamentos</div></div>
+        <div className="card blue"><div className="card-label">No cartão de crédito</div><div className="card-value">{fmt(creditTotal)}</div></div>
+        <div className="card amber"><div className="card-label">Pendente / vencido</div><div className="card-value">{fmt(pending)}</div></div>
+        <div className="card purple"><div className="card-label">A classificar</div><div className="card-value">{unclassified}</div><div className="card-sub">troque a categoria direto na tabela</div></div>
       </div>
-      <div className="table-wrap">
-        <div className="table-header">
-          <div className="table-title">Saidas — {MONTHS_F[month - 1]} {year}</div>
-          <div className="table-controls" style={{ flexWrap:'wrap', gap:8 }}>
-            <input style={{ width:140 }} placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} />
-            <select style={{ width:130 }} value={filterGrp} onChange={e => setFilterGrp(e.target.value)}>
-              <option value="all">Todos grupos</option>
-              <option value="necessidades">Necessidades</option>
-              <option value="desejos">Desejos</option>
-              <option value="futuro">Futuro</option>
-            </select>
-            <select style={{ width:110 }} value={filterSub} onChange={e => setFilterSub(e.target.value)}>
-              <option value="all">Fixo/Variavel</option>
-              <option value="fixed">Fixo</option>
-              <option value="variable">Variavel</option>
-            </select>
-            <select style={{ width:110 }} value={filterPay} onChange={e => setFilterPay(e.target.value)}>
-              <option value="all">Pagamento</option>
-              {PAY_METHODS.map(m => <option key={m} value={m}>{PAY_LABELS[m]}</option>)}
-            </select>
-            <button className="btn btn-primary" onClick={() => setModal({ type:'expense' })}>+ Nova Saida</button>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Descricao</th><th>Categoria</th><th>Grupo</th>
-              <th>Pagamento</th><th>Parcelas</th><th>Status</th><th>Valor</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && <tr><td colSpan="8" style={{ textAlign:'center', color:'var(--t3)', padding:24 }}>Nenhuma saida registrada</td></tr>}
-            {filtered.map(t => (
-              <tr key={t.id}>
-                <td>
-                  <b>{t.description}</b>
-                  <br />
-                  <span style={{ fontSize:11, color:'var(--t3)' }}>{t.subcategory === 'fixed' ? 'Fixo' : 'Variavel'}</span>
-                </td>
-                <td>{t.category}</td>
-                <td><GroupBadge group={t.group} /></td>
-                <td><PayBadge method={t.paymentMethod} /></td>
-                <td style={{ fontSize:12, color: t.installments > 1 ? 'var(--blue)' : 'var(--t3)' }}>
-                  {t.installments > 1 ? t.installmentMonth + '/' + year + ' — ' + t.installments + 'x' : 'A vista'}
-                </td>
-                <td><StatusBadge status={t.status} /></td>
-                <td style={{ fontFamily:'monospace', color:'var(--red)', fontWeight:700 }}>{fmt(t.amount)}</td>
-                <td>
-                  <div style={{ display:'flex', gap:4 }}>
-                    <button className="btn-icon" onClick={() => setModal({ ...t, _edit:true })}>&#9998;</button>
-                    <button className="btn-icon" style={{ color:'var(--red)' }} onClick={() => { if (confirm('Excluir?')) actions.delTxn(t.id); }}>&#x2715;</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          {filtered.length > 0 && (
-            <tfoot><tr><td colSpan="6">Total ({filtered.length} itens)</td><td>{fmt(total)}</td><td /></tr></tfoot>
-          )}
-        </table>
-      </div>
-      {modal && <TxnModal txn={modal._edit ? modal : null} type={modal.type || 'expense'} onSave={save} onClose={() => setModal(null)} />}
+      <TxnTable type="expense" title={`Saídas — ${MONTHS_F[month - 1]} ${year}`} rows={monthTxns} accounts={accounts}
+        onNew={() => setModal({ type:'expense' })} onEdit={t => setModal({ ...t, _edit:true })} onDelete={actions.delTxn}
+        onCategory={(t, c) => actions.setTxnCategory(t.id, c)} />
+      {modal && <TxnModal txn={modal._edit ? modal : null} type="expense" onSave={save} onClose={() => setModal(null)} />}
     </div>
   );
 }
+
 
 // ===================== CALENDAR PAGE =====================
 function CalendarPage() {
@@ -1173,7 +885,7 @@ function CalendarPage() {
     <div className="content">
       <div className="chart-card">
         <div className="chart-title">Calendario — {MONTHS_F[month - 1]} {year}</div>
-        <div className="chart-sub">Toque em um dia para ver as transacoes</div>
+        <div className="chart-sub">Toque em um dia para ver as transações</div>
         <div className="cal-grid" style={{ marginTop:12 }}>
           {['Dom','Seg','Ter','Qua','Qui','Sex','Sab'].map(d => <div key={d} className="cal-hdr">{d}</div>)}
           {grid.map((d, i) => {
@@ -1244,7 +956,7 @@ function AnalyticsPage() {
     <div className="content">
       <div className="cards-row">
         <div className="card green"><div className="card-label">Total Entradas {year}</div><div className="card-value">{fmt(totalInc)}</div></div>
-        <div className="card red"><div className="card-label">Total Saidas {year}</div><div className="card-value">{fmt(totalExp)}</div></div>
+        <div className="card red"><div className="card-label">Total Saídas {year}</div><div className="card-value">{fmt(totalExp)}</div></div>
         <div className={`card ${totalInc - totalExp >= 0 ? 'blue' : 'red'}`}>
           <div className="card-label">Saldo Anual</div>
           <div className="card-value">{fmtSigned(totalInc - totalExp)}</div>
@@ -1257,16 +969,16 @@ function AnalyticsPage() {
 
       <div className="charts-row">
         <div className="chart-card">
-          <div className="chart-title">Evolucao Mensal {year}</div>
+          <div className="chart-title">Evolução Mensal {year}</div>
           <div className="chart-sub">Barras comparativas — passe o mouse</div>
           <BarChart data={activeMonths} />
           <div className="legend" style={{ marginTop:8 }}>
             <div className="legend-item"><div className="legend-dot" style={{ background:'var(--green)' }} /> Entradas</div>
-            <div className="legend-item"><div className="legend-dot" style={{ background:'var(--red)' }} /> Saidas</div>
+            <div className="legend-item"><div className="legend-dot" style={{ background:'var(--red)' }} /> Saídas</div>
           </div>
         </div>
         <div className="chart-card">
-          <div className="chart-title">Gastos por Categoria (Anual)</div>
+          <div className="chart-title">Gastos por categoria (Anual)</div>
           <div className="chart-sub">Todos os meses de {year} — interativo</div>
           <div style={{ display:'flex', gap:12, alignItems:'center' }}>
             <DonutChart data={catData} total={totalExp} size={160} />
@@ -1283,11 +995,11 @@ function AnalyticsPage() {
 
       {creditTotal > 0 && (
         <div className="chart-card">
-          <div className="chart-title">&#128179; Analise de Credito</div>
+          <div className="chart-title">&#128179; Análise de Crédito</div>
           <div className="chart-sub">Gastos no cartao e parcelamentos</div>
           <div className="cards-row" style={{ gridTemplateColumns:'repeat(3,1fr)', marginBottom:16 }}>
             <div className="card blue" style={{ padding:'12px 16px' }}>
-              <div className="card-label" style={{ fontSize:10 }}>Total Credito</div>
+              <div className="card-label" style={{ fontSize:10 }}>Total Crédito</div>
               <div className="card-value" style={{ fontSize:18 }}>{fmt(creditTotal)}</div>
             </div>
             <div className="card purple" style={{ padding:'12px 16px' }}>
@@ -1324,7 +1036,7 @@ function AnalyticsPage() {
         <div style={{ overflowX:'auto' }}>
           <table>
             <thead>
-              <tr><th>Mes</th><th>Entradas</th><th>Saidas</th><th>Liquido</th><th>Taxa Poupar</th><th>Status</th></tr>
+              <tr><th>Mês</th><th>Entradas</th><th>Saídas</th><th>Liquido</th><th>Taxa Poupar</th><th>Status</th></tr>
             </thead>
             <tbody>
               {monthly.filter(m => m.inc > 0 || m.exp > 0).map(m => {
@@ -1368,29 +1080,29 @@ function TitularPage() {
   return (
     <div className="content">
       <div className="cards-row" style={{ gridTemplateColumns:'repeat(3,1fr)' }}>
-        <div className="card blue"><div className="card-label">Cartao {year}</div><div className="card-value">{fmt(totalCartao)}</div></div>
-        <div className="card amber"><div className="card-label">Debito/Pix {year}</div><div className="card-value">{fmt(totalDebito)}</div></div>
+        <div className="card blue"><div className="card-label">Cartão {year}</div><div className="card-value">{fmt(totalCartao)}</div></div>
+        <div className="card amber"><div className="card-label">Débito/Pix {year}</div><div className="card-value">{fmt(totalDebito)}</div></div>
         <div className="card red"><div className="card-label">Total</div><div className="card-value">{fmt(totalCartao + totalDebito)}</div></div>
       </div>
       <div className="chart-card">
-        <div className="chart-title">Cartao vs Debito por mes — {year}</div>
+        <div className="chart-title">Cartão vs débito/Pix por mês — {year}</div>
         <div className="chart-sub">
           <select style={{ width:160, display:'inline-block' }} value={titular} onChange={e => setTitular(e.target.value)}>
             <option value="todos">Todos</option>
-            <option value="salomao">Salomao</option>
+            <option value="salomao">Salomão</option>
             <option value="elizandra">Elizandra</option>
           </select>
         </div>
         <BarChart data={active} />
         <div className="legend" style={{ marginTop:8 }}>
           <div className="legend-item"><div className="legend-dot" style={{ background:'var(--green)' }} /> Cartao</div>
-          <div className="legend-item"><div className="legend-dot" style={{ background:'var(--red)' }} /> Debito/Pix</div>
+          <div className="legend-item"><div className="legend-dot" style={{ background:'var(--red)' }} /> Débito/Pix</div>
         </div>
       </div>
       <div className="table-wrap">
-        <div className="table-header"><div className="table-title">Detalhamento Mensal</div></div>
+        <div className="table-header"><div className="table-title">Detalhamento mensal</div></div>
         <table>
-          <thead><tr><th>Mes</th><th>Cartao</th><th>Debito/Pix</th><th>Total</th></tr></thead>
+          <thead><tr><th>Mês</th><th>Cartão</th><th>Débito/Pix</th><th>Total</th></tr></thead>
           <tbody>
             {active.length === 0 && <tr><td colSpan="4" style={{ textAlign:'center', color:'var(--t3)', padding:24 }}>Sem dados para este filtro</td></tr>}
             {active.map(m => (
@@ -1416,78 +1128,115 @@ const Icons = {
   calendar: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>,
   analytics: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><path d="M18 20V10M12 20V4M6 20v-6" /></svg>,
   planning: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" /><path d="M8 7h8M8 11h8" /></svg>,
+  upload: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5" /><path d="M12 3v12" /></svg>,
+  bank: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M3 10h18L12 4 3 10Z" /><path d="M5 10v8M9 10v8M15 10v8M19 10v8M3 21h18" /></svg>,
+  users: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></svg>,
   menu: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><path d="M3 12h18M3 6h18M3 18h18" /></svg>,
   sync: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>,
 };
 
 // ===================== APP SHELL =====================
-const NAV = [
-  { id:'dashboard', label:'Dashboard', icon:Icons.dashboard },
-  { id:'income', label:'Entradas', icon:Icons.income },
-  { id:'expenses', label:'Saidas', icon:Icons.expense },
-  { id:'calendar', label:'Calendario', icon:Icons.calendar },
-  { id:'analytics', label:'Analytics', icon:Icons.analytics },
-  { id:'titular', label:'Titular', icon:Icons.analytics },
-  { id:'planning', label:'Organizacao', icon:Icons.planning },
+const NAV_SECTIONS = [
+  { title:'Visão geral', items:[
+    { id:'dashboard', label:'Painel', icon:Icons.dashboard },
+    { id:'analytics', label:'Análises', icon:Icons.analytics },
+  ] },
+  { title:'Lançamentos', items:[
+    { id:'expenses', label:'Saídas', icon:Icons.expense },
+    { id:'income', label:'Entradas', icon:Icons.income },
+    { id:'calendar', label:'Calendário', icon:Icons.calendar },
+  ] },
+  { title:'Contas', items:[
+    { id:'import', label:'Importar extrato', icon:Icons.upload },
+    { id:'accounts', label:'Contas e destinos', icon:Icons.bank },
+    { id:'titular', label:'Por titular', icon:Icons.users },
+  ] },
+  { title:'Planejamento', items:[
+    { id:'planning', label:'Organização', icon:Icons.planning },
+  ] },
 ];
+const NAV = NAV_SECTIONS.flatMap(s => s.items);
+const BOTTOM_NAV = ['dashboard', 'expenses', 'import', 'accounts', 'planning'];
 
 function Sidebar({ mobile, onClose }) {
-  const { state, dispatch, actions } = useFin();
-  const { view, transactions, month, year } = state;
+  const { state, dispatch, user } = useFin();
+  const { view, transactions, month, year, syncing } = state;
   const monthTxns = filterMonth(transactions, month, year);
   const inc = sumAmts(filterType(monthTxns, 'income'));
   const exp = sumAmts(filterType(monthTxns, 'expense'));
   const net = inc - exp;
-  const isSupabase = !!supabase;
+  const logout = async () => { await fetch('/api/logout', { method:'POST' }); window.location.href = '/login'; };
 
   return (
     <>
       {mobile && <div className="sidebar-overlay" onClick={onClose} />}
-      <div className={`sidebar ${mobile ? 'sidebar-mobile open' : ''}`}>
+      <aside className={`sidebar ${mobile ? 'sidebar-mobile open' : ''}`}>
         <div className="logo">
-          <div className="logo-title"><span style={{ fontSize:20 }}>&#128176;</span>Financeiro</div>
-          <div className="logo-sub">Controle Familiar</div>
-          {isSupabase && <div style={{ fontSize:10, color:'var(--green)', marginTop:4, display:'flex', alignItems:'center', gap:4 }}><span style={{ width:6, height:6, borderRadius:'50%', background:'var(--green)', display:'inline-block' }} />Sincronizado</div>}
+          <span className="brand-mark">F</span>
+          <div><div className="logo-title">Financeiro</div><div className="logo-sub">Família Batista</div></div>
         </div>
         <nav className="nav">
-          {NAV.map(n => (
-            <div key={n.id} className={`nav-item ${view === n.id ? 'active' : ''}`}
-              onClick={() => { dispatch({ type:'SET_VIEW', payload:n.id }); if (onClose) onClose(); }}>
-              <span className="nav-icon">{n.icon}</span>{n.label}
+          {NAV_SECTIONS.map(sec => (
+            <div key={sec.title} className="nav-section">
+              <div className="nav-section-title">{sec.title}</div>
+              {sec.items.map(n => (
+                <button key={n.id} className={`nav-item ${view === n.id ? 'active' : ''}`}
+                  onClick={() => { dispatch({ type:'SET_VIEW', payload:n.id }); if (onClose) onClose(); }}>
+                  <span className="nav-icon">{n.icon}</span>{n.label}
+                </button>
+              ))}
             </div>
           ))}
         </nav>
         <div className="sidebar-footer">
           <div className="balance-card">
-            <div className="balance-label">Saldo do Mes</div>
+            <div className="balance-label">Saldo de {MONTHS_F[month - 1]}</div>
             <div className="balance-value" style={{ color: net >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtSigned(net)}</div>
-            <div style={{ fontSize:10, color:'var(--t3)', marginTop:4 }}>{MONTHS_F[month - 1]} {year}</div>
+            <div className="balance-split"><span className="pos">+{fmt(inc)}</span><span className="neg">−{fmt(exp)}</span></div>
           </div>
-          <button className="btn btn-ghost btn-sm" style={{ width:'100%', marginTop:8, justifyContent:'center', fontSize:11 }}
-            onClick={() => { if (confirm('Resetar todos os dados?')) { localStorage.removeItem('fin_txns_v3'); window.location.reload(); } }}>
-            <span style={{ width:14, height:14, display:'inline-block' }}>{Icons.sync}</span> Resetar Dados
-          </button>
+          <div className="user-chip">
+            <span className={`avatar avatar-${user.id}`}>{user.name[0]}</span>
+            <div className="user-info"><b>{user.name}</b><span><i className={`dot ${syncing ? 'amber' : 'green'}`} />{syncing ? 'sincronizando' : 'sincronizado'}</span></div>
+            <a className="btn-icon" href="/api/backup" title="Baixar backup completo">⤓</a>
+            <button className="btn-icon" onClick={logout} title="Sair">⏻</button>
+          </div>
         </div>
-      </div>
+      </aside>
     </>
   );
 }
 
-const PAGE_TITLES = { dashboard:'Dashboard', income:'Entradas', expenses:'Saidas', calendar:'Calendario', analytics:'Analytics', titular:'Titular', planning:'Organizacao' };
-const PAGE_SUBS = { dashboard:'Visao geral financeira', income:'Controle de ganhos', expenses:'Controle de gastos', calendar:'Calendario de pagamentos', analytics:'Projecoes e analises', titular:'Cartao e debito por titular', planning:'Dividas, categorias, investimentos e desejos' };
+const PAGE_TITLES = { dashboard:'Painel', income:'Entradas', expenses:'Saídas', calendar:'Calendário', analytics:'Análises', titular:'Por titular', planning:'Organização', import:'Importar extrato', accounts:'Contas e destinos' };
+const PAGE_SUBS = { dashboard:'Visão geral do mês', income:'De onde veio o dinheiro', expenses:'Para onde foi o dinheiro', calendar:'Pagamentos e recebimentos por dia', analytics:'Tendências e projeções', titular:'Cartão e débito de cada um', planning:'Dívidas, limites, investimentos e desejos', import:'CSV ou OFX do banco → lançamentos automáticos', accounts:'Movimento de cada conta, mês a mês' };
+
+function latestMonth(transactions) {
+  const today = new Date().toISOString().slice(0, 10);
+  const past = transactions.filter(t => t.date <= today).map(t => t.date).sort();
+  const d = past[past.length - 1];
+  return d ? { year: Number(d.slice(0, 4)), month: Number(d.slice(5, 7)) } : null;
+}
 
 function AppInner() {
-  const { state, dispatch, actions } = useFin();
-  const { view, month, year, loading, syncing } = state;
+  const { state, dispatch, actions, user } = useFin();
+  const { view, month, year, loading, error, toast } = state;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const positioned = useRef(false);
 
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => setIsMobile(window.innerWidth < 900);
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  useEffect(() => {
+    if (positioned.current || loading || !state.transactions.length) return;
+    positioned.current = true;
+    const cur = filterMonth(state.transactions, month, year).length;
+    const last = latestMonth(state.transactions);
+    if (!cur && last) dispatch({ type:'SET_MONTH', month:last.month, year:last.year });
+  }, [loading, state.transactions, month, year, dispatch]);
 
   const pages = {
     dashboard: <Dashboard />,
@@ -1496,14 +1245,15 @@ function AppInner() {
     calendar: <CalendarPage />,
     analytics: <AnalyticsPage />,
     titular: <TitularPage />,
-    planning: <PlanningPage transactions={state.transactions} month={month} year={year} onSetCategory={actions.setTxnCategory} />,
+    import: <ImportPage user={user} accounts={state.accounts} imports={state.imports} onImported={actions.reload} />,
+    accounts: <AccountsPage transactions={state.transactions} accounts={state.accounts} month={month} year={year} onChanged={actions.reload} />,
+    planning: <PlanningPage transactions={state.transactions} month={month} year={year} onSetCategory={actions.setTxnCategory} plan={state.plan} onSavePlan={actions.savePlan} />,
   };
 
-  if (loading) return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', flexDirection:'column', gap:16 }}>
-      <div style={{ width:40, height:40, border:'3px solid var(--bd)', borderTop:'3px solid var(--green)', borderRadius:'50%', animation:'spin 1s linear infinite' }} />
-      <div style={{ color:'var(--t3)', fontSize:14 }}>Carregando dados...</div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  if (loading || error) return (
+    <div className="splash">
+      {error ? <><div className="form-error">{error}</div><button className="btn btn-primary" onClick={actions.reload}>Tentar de novo</button></>
+        : <><div className="spinner lg" /><div>Carregando dados…</div></>}
     </div>
   );
 
@@ -1511,43 +1261,41 @@ function AppInner() {
     <div className="app">
       {!isMobile && <Sidebar />}
       {isMobile && sidebarOpen && <Sidebar mobile onClose={() => setSidebarOpen(false)} />}
-      <div className="main">
-        <div className="topbar">
-          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-            {isMobile && (
-              <button className="btn-icon" onClick={() => setSidebarOpen(true)} style={{ flexShrink:0 }}>
-                {Icons.menu}
-              </button>
-            )}
-            <div>
-              <div className="page-title">{PAGE_TITLES[view]}<span>{PAGE_SUBS[view]}</span></div>
-            </div>
+      <main className="main">
+        <header className="topbar">
+          <div className="topbar-left">
+            {isMobile && <button className="btn-icon" onClick={() => setSidebarOpen(true)} aria-label="Menu">{Icons.menu}</button>}
+            <div className="page-title">{PAGE_TITLES[view]}<span>{PAGE_SUBS[view]}</span></div>
           </div>
           <div className="topbar-right">
-            {syncing && <div style={{ fontSize:11, color:'var(--t3)', display:'flex', alignItems:'center', gap:4 }}><span style={{ width:8, height:8, borderRadius:'50%', background:'var(--amber)', animation:'pulse 1s infinite' }} />Sincronizando</div>}
+            {view !== 'import' && <button className="btn btn-ghost btn-sm hide-sm" onClick={() => dispatch({ type:'SET_VIEW', payload:'import' })}>⇪ Importar extrato</button>}
             <MonthSelector month={month} year={year} onChange={(m, y) => dispatch({ type:'SET_MONTH', month:m, year:y })} />
           </div>
-        </div>
-        <div style={{ flex:1, overflowY:'auto' }}>
+        </header>
+        <div className="main-scroll">
           {pages[view] || <Dashboard />}
         </div>
-      </div>
-      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+        {isMobile && (
+          <nav className="bottom-nav">
+            {BOTTOM_NAV.map(id => { const n = NAV.find(x => x.id === id); return (
+              <button key={id} className={view === id ? 'active' : ''} onClick={() => dispatch({ type:'SET_VIEW', payload:id })}><span className="nav-icon">{n.icon}</span>{n.label.split(' ')[0]}</button>
+            ); })}
+          </nav>
+        )}
+      </main>
+      {toast && <div className={`toast ${toast.type}`}>{toast.text}</div>}
     </div>
   );
 }
 
-export default function Home() {
+export default function Home({ user }) {
   return (
     <>
       <Head>
-        <title>Financeiro Familia</title>
+        <title>Financeiro Família</title>
         <meta name="description" content="Controle financeiro familiar" />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <meta name="theme-color" content="#0A0A0C" />
-        <meta name="apple-mobile-web-app-capable" content="yes" />
       </Head>
-      <FinProvider>
+      <FinProvider user={user}>
         <AppInner />
       </FinProvider>
     </>
